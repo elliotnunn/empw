@@ -1,0 +1,19 @@
+EMPW (Emulated MPW) = Mini vMac + Macintosh Programmer's Workshop + glue
+
+
+Requirements (install all with brew):
+- hfsutils
+- rsync (newer than the one shipping with macOS)
+- python3
+
+
+Examples:
+
+# Enjoy an interactive MPW session in Mini vMac (kills your battery life!)
+$ cd my-fancy-source-tree && empw
+
+# Run a non-interactive MPW command and capture its standard output.
+$ empw Help FileSystem
+
+# Transfer files to the emulated MPW session.
+$ echo Hello, world! > TextFile && empw Catenate TextFile

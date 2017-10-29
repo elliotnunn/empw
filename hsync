@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+
+from subprocess import run, PIPE, DEVNULL
+from sys import argv
+from time import sleep
+import datetime
+from os import path
+
+import tempfile
+
+# oldrun = run
+# def run(*args, **kwargs):
+# 	print('CMD', *args)
+# 	return oldrun(*args, **kwargs)
+
+
+
+
+# I am now modifying this to accept *no* arguments,
+# instead operating on the CWD.
+
+
+# A couple of useful HFSUTILS wrappers
+
+def h_topdir():
+	rc = 0
+	while rc == 0:
+		rc = run(['hcd','::'], stderr=DEVNULL).returncode
+
+def h_reccd(path_comps):
+	h_topdir()
+	for p in path_comps:
+		run(['hcd', p], check=True)
+
+
+
+
+
+# We might need to sneakily edit some metadata...
+
+def getfours(path):
+	cmds = ('-c','-t')
+	cps = (run(['GetFileInfo', cmd, path], stdout=PIPE, check=True) for cmd in cmds)
+	return tuple(eval('b' + cp.stdout.decode('ascii')) for cp in cps)
+
+def gettype(path):
+	cmds = ('-t',)
+	cps = (run(['GetFileInfo', cmd, path], stdout=PIPE, check=True) for cmd in cmds)
+	return next(eval('b' + cp.stdout.decode('ascii')) for cp in cps)
+
+def setfours(path, cc, tc):
+	cc, tc = (set_to.replace(b'\0',b'\\0').decode('ascii') for set_to in (cc, tc))
+	run(['SetFile', '-c', cc, '-t', tc, path], check=True)
+
+def ensure_fourccs(xpath):
+	cc = gettype(xpath)
+
+	if cc == b'\0\0\0\0':
+		cc = b'MPS '
+		tc = b'TEXT'
+
+		if xpath.endswith('.x'):
+			tc = b'XCOF'
+		elif xpath.endswith('.o') or xpath.endswith('.lib'):
+			tc = b'OBJ '
+		elif xpath.endswith('.rsrc') or xpath.endswith('Resources'):
+			tc = b'rsrc'
+			cc = b'RSED'
+
+		setfours(xpath, cc, tc)
+
+
+
+
+# All relative to the CWD, of course:
+srcimg = 'SourceForEmulator.dmg'
+label = 'Src'
+
+
+
+
+
+# Read and sanitise the arguments. Outputs: "dirs" and "cmds" (both lists, may be empty)
+# Dirs are in /full/path/without/trailing/slash form, thanks to os.path.abspath
+
+if not path.exists(srcimg):
+	run(['dd', 'if=/dev/zero', 'of='+srcimg, 'bs=1048576', 'count='+str(128)], stdout=DEVNULL, stderr=DEVNULL, check=True)
+	run(['hformat', '-l', label, srcimg], stdout=DEVNULL, check=True)
+	run(['humount'], check=True)
+
+
+
+
+# Now run rsync and see what we can get out of it! (Should at least reconsider rsync policy!)
+# Rsync should update any changed file
+# Potential problem: need to remove ._ thingummyjigs!
+
+rsync_opts = [
+	'--dry-run',					# Ask rsync what it *would* do if macOS
+	'--itemize-changes',			# 	hadn't dropped R/W HFS support.
+	'--exclude', '.*',				# Down with dotfiles.
+	'--exclude', srcimg,
+	'--exclude', 'Desktop DB',
+	'--exclude', 'Desktop DF',
+	'--exclude', 'Trash',
+	'--recursive',
+	'-tX',							# consider times and xattrs
+	'--delete',						# may delete things on the vMac drive
+]
+
+try:
+	devnode, mountpoint = run(['hdiutil', 'attach', '-nobrowse', srcimg], stdout=PIPE, check=True).stdout.decode('ascii').split()
+	mountpoint = mountpoint.rstrip('/') # try to deal in clean paths
+
+	rsync_list = [] # (local_base_path, relative_path_components, rsync_code) tuple
+
+	# rsync /src/dir/without/trailing/slash/DIRNAME /dest/dir/with/trailing/slash/
+	# results in /dest/dir/with/trailing/slash/DIRNAME
+	rsync = run(['rsync', *rsync_opts, './', mountpoint+'/'], stdout=PIPE, check=True)
+	new_rsync_lines = rsync.stdout.decode('utf8').splitlines()
+
+	for new_rsync_line in new_rsync_lines:
+		spcidx = new_rsync_line.index(' ')
+		code_part = new_rsync_line[:spcidx]
+		path_part = new_rsync_line[spcidx+1:].lstrip()
+
+		if '._' in path_part:
+			raise ValueError('AppleDouble-style name detected: %s' % path_part)
+
+		rsync_list.append((code_part, path_part))
+
+finally:
+	run(['hdiutil', 'detach', mountpoint], check=True, stdout=DEVNULL)
+
+
+
+# for rsync_code, path in rsync_list:
+# 	# Get rid of the silly AppleDouble prefix
+# 	a, b = path.splitext(rsync_path)
+# 	if b.startswith('._'):
+# 		b = b[2:]
+# 		path = path.join(a, b)
+
+
+# 	try:
+
+
+
+
+run(['hmount', srcimg], stdout=DEVNULL, check=True)
+
+try:
+	for rsync_code, rsync_path in rsync_list:
+		# print([local_dir, rsync_code, rsync_path])
+
+		# Suggest: replace with code to make fuck/marry/kill plan for each file
+
+
+		# first, parse the rsync commands!
+		if rsync_code.startswith('*'):
+			if rsync_code == '*deleting':
+				print('-', rsync_path)
+
+				# similar to the folder creation code below
+				if rsync_path.endswith('/'):
+					cmdname = 'hrmdir'
+				else:
+					cmdname = 'hdel'
+
+				a, b = path.split(rsync_path.rstrip('/'))
+				hfs_dir_comps = a.split('/') if a else []
+				hfs_deleteme = b
+
+				h_reccd(hfs_dir_comps)
+				run([cmdname, hfs_deleteme], check=True)
+
+			else:
+				raise ValueError('Unknown extended rsync code: %s' % rsync_code)
+
+		elif rsync_code.startswith('.'):
+			pass
+
+		else:
+			utype, ftype, cdiff, sdiff, tdiff, pdiff, odiff, gdiff, *_ = rsync_code
+
+			if utype == '>':
+				if ftype == 'f':
+					print('+', rsync_path)
+
+					hfs_dir = ':' + path.join(path.dirname(rsync_path), '').replace(*'/:')
+
+					with tempfile.NamedTemporaryFile(prefix='/tmp/', suffix='.bin') as f:
+						macbin_tmp = f.name
+
+					h_topdir()
+					ensure_fourccs(rsync_path)
+					run(['macbinary', 'encode', '--overwrite', '-o', macbin_tmp, rsync_path], check=True)
+					run(['hcopy', '-m', macbin_tmp, hfs_dir], check=True)
+
+				else:
+					raise ValueError()
+
+			elif utype == 'c':
+				if ftype == 'd':
+					a, b = path.split(rsync_path.rstrip('/'))
+					hfs_dir_comps = a.split('/') if a else []
+					hfs_mkdir_name = b
+
+					h_reccd(hfs_dir_comps)
+					run(['hmkdir', hfs_mkdir_name], check=True)
+
+				else:
+					raise ValueError()
+
+			elif utype == '.':
+				pass
+
+			else:
+				raise ValueError('Unknown rsync update code: %s' % rsync_code)
+
+finally:
+	run(['humount'], check=True)
+
+
+
+
+# YXcstpoguax  path/to/file
+# |||||||||||
+# `----------- the type of update being done::
+#  ||||||||||   <: file is being transferred to the remote host (sent).
+#  ||||||||||   >: file is being transferred to the local host (received).
+#  ||||||||||   c: local change/creation for the item, such as:
+#  ||||||||||      - the creation of a directory
+#  ||||||||||      - the changing of a symlink,
+#  ||||||||||      - etc.
+#  ||||||||||   h: the item is a hard link to another item (requires --hard-links).
+#  ||||||||||   .: the item is not being updated (though it might have attributes that are being modified).
+#  ||||||||||   *: means that the rest of the itemized-output area contains a message (e.g. "deleting").
+#  ||||||||||
+#  `---------- the file type:
+#   |||||||||   f for a file,
+#   |||||||||   d for a directory,
+#   |||||||||   L for a symlink,
+#   |||||||||   D for a device,
+#   |||||||||   S for a special file (e.g. named sockets and fifos).
+#   |||||||||
+#   `--------- c: different checksum (for regular files)
+#    ||||||||     changed value (for symlink, device, and special file)
+#    `-------- s: Size is different
+#     `------- t: Modification time is different
+#      `------ p: Permission are different
+#       `----- o: Owner is different
+#        `---- g: Group is different
+#         `--- u: The u slot is reserved for future use.
+#          `-- a: The ACL information changed

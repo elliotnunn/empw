@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+
+from sys import argv
+from subprocess import run, PIPE, DEVNULL
+from os import path
+
+srcimg = 'SourceForEmulator.dmg'
+
+rsync_opts = [
+	'--exclude', '.*',				# Down with dotfiles.
+	'--exclude', srcimg,
+	'--exclude', 'Desktop DB',
+	'--exclude', 'Desktop DF',
+	'--exclude', 'Trash',
+	'--recursive',
+	'-tX',							# consider times and xattrs
+	'--delete',						# may delete things on the vMac drive
+	# '--itemize-changes',
+]
+
+
+
+devnode, mountpoint = run(['hdiutil', 'attach', '-nobrowse', srcimg], stdout=PIPE, check=True).stdout.decode('ascii').split()
+
+try:
+	mountpoint = mountpoint.rstrip('/') # try to deal in clean paths
+
+	run(['rsync', *rsync_opts, mountpoint+'/', './'], check=True)
+
+finally:
+	run(['hdiutil', 'detach', mountpoint], stdout=DEVNULL, check=True)
