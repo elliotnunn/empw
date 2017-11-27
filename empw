@@ -1,11 +1,50 @@
 #!/usr/bin/env python3
 
-from os import path, listdir
-from sys import argv
+from os import path, listdir, environ, getcwd, chdir
+from sys import argv, stderr
 import datetime
 from subprocess import run, PIPE, DEVNULL
 import tempfile
 from shutil import copyfile
+
+
+
+
+BASILISK_PREFS = """
+extfs 
+screen win/640/480
+seriala 
+serialb /dev/null
+udptunnel false
+udpport 6066
+bootdrive 0
+bootdriver 0
+ramsize 33554432
+frameskip 0
+modelid 5
+cpu 3
+fpu true
+nocdrom false
+nosound false
+noclipconversion false
+nogui false
+jit true
+jitfpu true
+jitdebug false
+jitcachesize 8192
+jitlazyflush true
+jitinline true
+keyboardtype 5
+keycodes false
+mousewheelmode 1
+mousewheellines 3
+dsp /dev/dsp
+mixer /dev/mixer
+ignoresegv false
+idlewait true
+"""
+
+
 
 
 
@@ -17,9 +56,106 @@ def h_topdir():
 
 
 
+def climb(frm):
+	yield frm
+	l = frm
+	while 1:
+		t = path.dirname(l)
+		if t == l: break
+		l = t
+		yield l
+
+
+def rel_path_to_hfs(i):
+	if '/' not in i:
+		return i
+
+	if ':' in i:
+		return i
+
+	if i in '..': i = i + '/'
+
+	if i.startswith('./'):
+		i = ':' + i[2:]
+
+	i = i.replace('../', ':')
+
+	i = i.replace('/', ':')
+
+	if not i.startswith(':'): i = ':' + i
+
+
+def rel_path_to_hfs(i):
+	if not i.startswith('/') and ('/' in i or i in '..'):
+		# do all this stuff:
+		pass
+	else:
+		return i
+
+	oi = i
+
+	if i in '..': i = i + '/'
+
+	if '/' not in i:
+		return i
+
+	if ':' in i:
+		return i
+
+	if i.startswith('./'):
+		i = ':' + i[2:]
+
+	i = i.replace('../', '::')
+
+	i = i.replace('/', ':')
+
+	if not i.startswith(':'): i = ':' + i
+
+	try:
+		if path.isdir(oi) and not i.endswith(':'):
+			i = i + ':'
+	except FileNotFoundError:
+		pass
+
+	return i
+
+
+
 my_name, *cmds = argv
 
+
+# Interpret leading '-options':
+which_emulator = 'vmac'
+while cmds and cmds[0].startswith('-'):
+	if cmds[0] == '-v':
+		which_emulator = 'vmac'
+	elif cmds[0] == '-b':
+		which_emulator = 'basilisk'
+	else:
+		raise ValueError('Unknown option: %s' % cmds[0])
+
+	cmds = cmds[1:]
+
+# Convert paths of things that actually exist:
+cmds = [rel_path_to_hfs(x) for x in cmds]
+
+# Choose our working directory...
 srcimage = 'SourceForEmulator.dmg'
+mpw_cd_cmd = 'Src:'
+
+try:
+	newcwd = next(d for d in climb(getcwd()) if path.exists(path.join(d, srcimage)))
+except StopIteration:
+	newcwd = getcwd()
+
+if newcwd != getcwd():
+	rel = path.relpath(getcwd(), newcwd)
+	for c in rel.split('/'):
+		mpw_cd_cmd += c + ':'
+	chdir(newcwd)
+
+
+
 
 cmdline = ' '.join(cmds)
 
@@ -28,6 +164,10 @@ scriptfolder = path.dirname(path.abspath(__file__))
 vmac_app = path.join(scriptfolder, 'Mini vMac 9590.app') # requested for later: -t mc64 -m II -sound 0 -speed a -bg 1 -as 0
 vmac_exec = path.join(vmac_app, 'Contents', 'MacOS')
 vmac_exec = path.join(vmac_exec, next(l for l in listdir(vmac_exec) if not l.startswith('.')))
+
+basilisk_app = path.join(scriptfolder, 'BasiliskII.app')
+basilisk_exec = path.join(basilisk_app, 'Contents', 'MacOS')
+basilisk_exec = path.join(basilisk_exec, next(l for l in listdir(basilisk_exec) if not l.startswith('.')))
 
 bootimg = path.join(scriptfolder, 'MPW-VM.dmg')
 backupimg = path.join(scriptfolder, 'MPW-VM-KnownGood.dmg')
@@ -43,28 +183,31 @@ if not path.exists(bootimg):
 
 
 if cmds:
-	mpw_cmd = """# This is an auto-generated MPW script!
-Echo '# %s'
-Echo '# %s'
-SetDirectory Src:
-Begin
-	%s
-End > "{Boot}StdOut"
-Echo
+	mpw_cmd = u"""# This is an auto-generated MPW script!
+SetDirectory '%s'
+Set EmpwReturned 0
+"{Boot}AutoGenInner" > "{Boot}StdOut" \u2265 "{Boot}StdErr" || Set EmpwReturned {Status}
+Echo {EmpwReturned} > "{Boot}Return"
+Move -y "{Boot}AutoGenInner" "{Boot}Trash:"
 Move -y "{__Startup__i}" "{Boot}Trash:"
 ShutDown -y
-""" % (datetime.datetime.now(), cmdline, cmdline)
+""" % (mpw_cd_cmd)
 else:
 	mpw_cmd = """# This is an auto-generated MPW script!
-SetDirectory Src:
+SetDirectory '%s'
 Move -y "{__Startup__i}" "{Boot}Trash:"
-"""
+""" % mpw_cd_cmd
 
 mpw_cmd = mpw_cmd.replace('\n','\r')
 
-with open('/tmp/AutoGen', 'w') as f:
-	f.write(mpw_cmd)
+with open('/tmp/AutoGen', 'wb') as f:
+	f.write(mpw_cmd.encode('mac_roman'))
 	tmp_path = f.name
+
+if cmds:
+	with open('/tmp/AutoGenInner', 'wb') as f:
+		f.write(cmdline.encode('mac_roman'))
+		tmp_path_inner = f.name
 
 
 run([hsync], check=True)
@@ -74,19 +217,39 @@ run([hsync], check=True)
 run(['SetFile', '-t', 'TEXT', '-c', 'MPS ', tmp_path], check=True)
 run(['macbinary', 'encode', '--overwrite', '-o', tmp_path+'.bin', tmp_path], check=True)
 
+if cmds:
+	run(['SetFile', '-t', 'TEXT', '-c', 'MPS ', tmp_path_inner], check=True)
+	run(['macbinary', 'encode', '--overwrite', '-o', tmp_path_inner+'.bin', tmp_path_inner], check=True)
+
 run(['hmount', bootimg], check=True, stdout=DEVNULL)
 h_topdir()
 run(['hcopy', '-m', tmp_path+'.bin', ':MPW:Startup Items:'], check=True)
+if cmds:
+	run(['hcopy', '-m', tmp_path_inner+'.bin', ':AutoGenInner'], check=True)
 run(['humount'], check=True)
 
 
 
 
-# http://www.gryphel.com/c/minivmac/osx_note.html
-# Disable Path Randomization
-run(['xattr', '-cr', vmac_app], check=True)
+if which_emulator == 'vmac':
+	# http://www.gryphel.com/c/minivmac/osx_note.html
+	# Disable Path Randomization
+	run(['xattr', '-cr', vmac_app], check=True)
 
-run([vmac_exec, bootimg, srcimage], check=True)
+	run([vmac_exec, bootimg, srcimage], check=True)
+
+elif which_emulator == 'basilisk':
+	with tempfile.TemporaryDirectory(prefix='/tmp/') as d:
+		with open(path.join(d, '.basilisk_ii_prefs'), 'w') as f:
+			f.write(BASILISK_PREFS)
+			print('disk', bootimg, file=f)
+			print('disk', srcimage, file=f)
+			print('rom', path.join(scriptfolder, 'MacIIci.ROM'), file=f)
+
+		newenviron = dict(environ, HOME=d.rstrip('/'))
+		run([basilisk_exec], env=newenviron, stdout=DEVNULL, stderr=DEVNULL, check=True)
+
+
 
 
 
@@ -98,7 +261,15 @@ run([hsyncback], check=True)
 if cmds:
 	run(['hmount', bootimg], check=True, stdout=DEVNULL)
 	run(['hcopy', '-t', ':StdOut', '/tmp/StdOut'], check=True)
+	run(['hcopy', '-t', ':StdErr', '/tmp/StdErr'], check=True)
+	run(['hcopy', '-t', ':Return', '/tmp/Return'], check=True)
 	run(['humount'], check=True)
 
-	with open('/tmp/StdOut') as f:
-		print(f.read(), end='')
+	with open('/tmp/StdOut', 'rb') as f:
+		print(f.read().decode('mac_roman'), end='')
+
+	with open('/tmp/StdErr', 'rb') as f:
+		print(f.read().decode('mac_roman'), end='', file=stderr)
+
+	with open('/tmp/Return', 'rb') as f:
+		exit(int(f.read()))

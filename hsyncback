@@ -11,7 +11,10 @@ rsync_opts = [
 	'--exclude', srcimg,
 	'--exclude', 'Desktop DB',
 	'--exclude', 'Desktop DF',
+	'--exclude', 'Desktop Folder',
 	'--exclude', 'Trash',
+	'--exclude', 'TheVolumeSettingsFolder',
+	'--exclude', 'TheFindByContentFolder',
 	'--recursive',
 	'-tX',							# consider times and xattrs
 	'--delete',						# may delete things on the vMac drive
@@ -20,7 +23,8 @@ rsync_opts = [
 
 
 
-devnode, mountpoint = run(['hdiutil', 'attach', '-nobrowse', srcimg], stdout=PIPE, check=True).stdout.decode('ascii').split()
+cmdresult = run(['hdiutil', 'attach', '-nobrowse', srcimg], stdout=PIPE, check=True).stdout.decode('ascii')
+mountpoint = next(x for x in cmdresult.split() if x.startswith('/') and not x.startswith('/dev'))
 
 try:
 	mountpoint = mountpoint.rstrip('/') # try to deal in clean paths
