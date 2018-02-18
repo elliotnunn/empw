@@ -36,42 +36,6 @@ def h_reccd(path_comps):
 
 
 
-# We might need to sneakily edit some metadata...
-
-def getfours(path):
-	cmds = ('-c','-t')
-	cps = (run(['GetFileInfo', cmd, path], stdout=PIPE, check=True) for cmd in cmds)
-	return tuple(eval('b' + cp.stdout.decode('ascii')) for cp in cps)
-
-def gettype(path):
-	cmds = ('-t',)
-	cps = (run(['GetFileInfo', cmd, path], stdout=PIPE, check=True) for cmd in cmds)
-	return next(eval('b' + cp.stdout.decode('ascii')) for cp in cps)
-
-def setfours(path, cc, tc):
-	cc, tc = (set_to.replace(b'\0',b'\\0').decode('ascii') for set_to in (cc, tc))
-	run(['SetFile', '-c', cc, '-t', tc, path], check=True)
-
-def ensure_fourccs(xpath):
-	cc = gettype(xpath)
-
-	if cc == b'\0\0\0\0':
-		cc = b'MPS '
-		tc = b'TEXT'
-
-		if xpath.endswith('.x'):
-			tc = b'XCOF'
-		elif xpath.endswith('.o') or xpath.endswith('.lib'):
-			tc = b'OBJ '
-		elif xpath.endswith('.rsrc') or xpath.endswith('Resources'):
-			tc = b'rsrc'
-			cc = b'RSED'
-
-		setfours(xpath, cc, tc)
-
-
-
-
 # All relative to the CWD, of course:
 srcimg = 'SourceForEmulator.dmg'
 label = 'Src'
@@ -197,7 +161,6 @@ try:
 						macbin_tmp = f.name
 
 					h_topdir()
-					ensure_fourccs(rsync_path)
 					run(['macbinary', 'encode', '--overwrite', '-o', macbin_tmp, rsync_path], check=True)
 					run(['hcopy', '-m', macbin_tmp, hfs_dir], check=True)
 
