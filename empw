@@ -44,6 +44,38 @@ ignoresegv false
 idlewait true
 """
 
+SHEEPSHAVER_PREFS = """
+extfs 
+screen win/640/480
+windowmodes 0
+screenmodes 0
+seriala 
+serialb /dev/null
+bootdrive 0
+bootdriver 0
+ramsize 67108864
+frameskip 8
+gfxaccel true
+nocdrom false
+nonet false
+nosound false
+nogui false
+noclipconversion false
+ignoresegv false
+jit true
+jit68k false
+keyboardtype 5
+ether 
+keycodes false
+keycodefile 
+mousewheelmode 1
+mousewheellines 3
+dsp /dev/dsp
+mixer /dev/mixer
+ignoresegv false
+idlewait true
+"""
+
 
 
 
@@ -131,6 +163,8 @@ while cmds and cmds[0].startswith('-'):
 		which_emulator = 'vmac'
 	elif cmds[0] == '-b':
 		which_emulator = 'basilisk'
+	elif cmds[0] == '-s':
+		which_emulator = 'sheepshaver'
 	else:
 		raise ValueError('Unknown option: %s' % cmds[0])
 
@@ -168,6 +202,10 @@ vmac_exec = path.join(vmac_exec, next(l for l in listdir(vmac_exec) if not l.sta
 basilisk_app = path.join(scriptfolder, 'BasiliskII.app')
 basilisk_exec = path.join(basilisk_app, 'Contents', 'MacOS')
 basilisk_exec = path.join(basilisk_exec, next(l for l in listdir(basilisk_exec) if not l.startswith('.')))
+
+sheepshaver_app = path.join(scriptfolder, 'SheepShaver.app')
+sheepshaver_exec = path.join(sheepshaver_app, 'Contents', 'MacOS')
+sheepshaver_exec = path.join(sheepshaver_exec, next(l for l in listdir(sheepshaver_exec) if not l.startswith('.')))
 
 bootimg = path.join(scriptfolder, 'MPW-VM.dmg')
 backupimg = path.join(scriptfolder, 'MPW-VM-KnownGood.dmg')
@@ -248,6 +286,17 @@ elif which_emulator == 'basilisk':
 
 		newenviron = dict(environ, HOME=d.rstrip('/'))
 		run([basilisk_exec], env=newenviron, stdout=DEVNULL, stderr=DEVNULL, check=True)
+
+elif which_emulator == 'sheepshaver':
+	with tempfile.TemporaryDirectory(prefix='/tmp/') as d:
+		with open(path.join(d, '.sheepshaver_prefs'), 'w') as f:
+			f.write(SHEEPSHAVER_PREFS)
+			print('disk', bootimg, file=f)
+			print('disk', srcimage, file=f)
+			print('rom', path.join(scriptfolder, 'PowerMac.ROM'), file=f)
+
+		newenviron = dict(environ, HOME=d.rstrip('/'))
+		run(['arch', '-32', sheepshaver_exec], env=newenviron, stdout=DEVNULL, stderr=DEVNULL, check=True)
 
 
 
