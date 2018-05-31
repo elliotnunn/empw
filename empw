@@ -216,6 +216,7 @@ hsyncback = path.join(scriptfolder, 'hsyncback')
 if not path.exists(bootimg):
 	print('Creating new scratch boot disk.')
 	copyfile(backupimg, bootimg)
+	run(['xattr', '-w', 'com.apple.metadata:com_apple_backup_excludeItem', 'com.apple.backupd', bootimg])
 
 
 

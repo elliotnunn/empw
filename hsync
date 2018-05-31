@@ -48,6 +48,8 @@ label = 'Src'
 # Dirs are in /full/path/without/trailing/slash form, thanks to os.path.abspath
 
 if not path.exists(srcimg):
+	run(['touch', srcimg])
+	run(['xattr', '-w', 'com.apple.metadata:com_apple_backup_excludeItem', 'com.apple.backupd', srcimg])
 	run(['dd', 'if=/dev/zero', 'of='+srcimg, 'bs=1048576', 'count='+str(256)], stdout=DEVNULL, stderr=DEVNULL, check=True)
 	run(['hformat', '-l', label, srcimg], stdout=DEVNULL, check=True)
 	run(['humount'], check=True)
