@@ -54,7 +54,7 @@ serialb /dev/null
 bootdrive 0
 bootdriver 0
 ramsize 67108864
-frameskip 8
+frameskip 0
 gfxaccel true
 nocdrom false
 nonet false
