@@ -1,3 +1,12 @@
+This software stopped working when HFS read-only support was removed from macOS.
+
+But there are excellent alternatives for accessing MPW from a modern computer:
+
+https://github.com/elliotnunn/mps
+https://github.com/ksherlock/mpw
+
+------------------------------------------------------------------------
+
 EMPW (Emulated MPW) = Mini vMac + Macintosh Programmer's Workshop + glue
 
 
